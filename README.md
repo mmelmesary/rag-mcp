@@ -127,6 +127,11 @@ cluster: prod-eu
 # Body...
 ```
 
+Front matter is entirely yours: `type`, `component`, and `cluster` become
+searchable filter fields, but they are free-form labels — use them for any
+grouping that fits your domain (environments, customers, products, teams) or
+omit them for plain semantic search.
+
 Then re-index — no rebuild needed (the job bind-mounts `./knowledge`):
 
 ```bash
