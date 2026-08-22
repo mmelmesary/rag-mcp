@@ -21,29 +21,56 @@ incident reports, RCAs, wiki exports, anything in markdown or PDF.
 ## Architecture
 
 ```
- markdown/PDF docs            ┌──────────────────────────────────────┐
- knowledge/**  ──────────────►│ rag-ingest (one-shot job)            │
-                              │ front-matter → section-aware chunks  │
-                              │ → dense (Ollama/OpenAI-compat)       │
-                              │   + BM25 (FastEmbed, offline)        │
-                              │ → idempotent upsert into Qdrant      │
-                              └──────────────────┬───────────────────┘
-                                                 ▼
-                              ┌──────────────────────────────────────┐
-   MCP clients                │            Qdrant                    │
-   ─────────────────          │  collection: named vectors           │
-   Claude Code ──────────────►│    dense (cosine HNSW)               │
-   LibreChat Agents ────────► │    bm25  (sparse, IDF)               │
-   your agent ──────────────► │                                      │
-                              └──────────────────▲───────────────────┘
-                                                 │ hybrid query (Prefetch ×2 + RRF)
-                              ┌──────────────────┴───────────────────┐
-                              │ rag-mcp :8084 (FastMCP)              │
-                              │ READ-ONLY tools:                     │
-                              │  rag_search / search_incidents /     │
-                              │  search_runbooks / collections /     │
-                              │  health   (+ optional rerank step)   │
-                              └──────────────────────────────────────┘
+                       WRITE PATH — populate the KB
+  ┌───────────────────────────┐
+  │       knowledge/**        │   your markdown & PDF docs,
+  │  runbooks · incidents ·   │   optional YAML front matter
+  │  wikis · post-mortems     │
+  └─────────────┬─────────────┘
+                │
+                ▼
+  ┌───────────────────────────┐   embed    ┌─────────────────────────────┐
+  │        rag-ingest         │  chunks    │     embedding provider      │
+  │  · parses front matter    │───────────►│   ollama (offline default)  │
+  │  · heading-aware chunks   │            │   or any OpenAI-compatible  │
+  │    (PDF pages = sections) │◄───────────│   /v1/embeddings endpoint   │
+  │  · idempotent upserts,    │  vectors   └──────────────▲──────────────┘
+  │    stale-tail cleanup     │                           │
+  └─────────────┬─────────────┘                           │  the SAME
+                │ upsert                                  │  provider also
+                ▼                                         │  embeds queries
+  ┌───────────────────────────┐                           │  (see rag-mcp ↘)
+  │      Qdrant  (v1.12)      │                           │
+  │    collection:  rag_kb    │                           │
+  │   dense (cosine · HNSW)   │                           │
+  │   bm25  (sparse · IDF)    │                           │
+  └─────────────▲─────────────┘                           │
+                │                                         │
+                │  1. hybrid search:                      │
+                │     Prefetch(dense)+Prefetch(bm25)      │
+                │     fused with Reciprocal Rank Fusion   │
+                │                                         │
+  ┌─────────────┴───────────────────────────────┐         │
+  │            rag-mcp     :8084/mcp            │         │
+  │   FastMCP server — READ-ONLY tool surface   │         │
+  │                                             │  2. em- │
+  │   rag_search         search_incidents       │  beds   │
+  │   search_runbooks     rag_collections       │◄────────┘
+  │   rag_health                                │  the
+  │   (+ optional step 3: cross-encoder rerank  │  query
+  │     via a Cohere/Jina-compatible /rerank)   │
+  └──▲──────────────────────▲───────────────────┘
+     │                      │
+     │  MCP                 │  POST /internal/knowledge/*
+     │  streamable-http     │  capture · similar · feedback · stats
+     │  (search queries)    │  token-gated; NEVER visible to the LLM
+     │                      │
+  ┌──┴───────────────────┐  │
+  │      MCP clients     │  ▼
+  │  Claude Code ·       │  trusted automation
+  │  LibreChat ·         │  (agent / CI capturing
+  │  your own agents     │  incidents + human feedback)
+  └──────────────────────┘
 ```
 
 ## Quickstart
