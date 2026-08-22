@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Env & secrets — never commit real values
+.env
+.env.*
+!.env.example
+
+# Qdrant local storage (host-run mode)
+storage/
+qdrant/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local docs & exports nobody should publish
+*.local.md

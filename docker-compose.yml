@@ -1,0 +1,133 @@
+# rag-mcp standalone stack: Qdrant vector DB + RAG-memory MCP server.
+#
+# Start:
+#   cp .env.example .env   # edit as needed
+#   docker compose up -d --build
+#
+# Populate the knowledge base (markdown/PDF under ./knowledge):
+#   docker compose run --rm rag-ingest
+# Full rebuild of the collection:
+#   docker compose run --rm rag-ingest --recreate
+
+services:
+  # Vector DB — stores embeddings for the knowledge base.
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: rag-mcp-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"   # REST API
+      - "${QDRANT_GRPC_PORT:-6334}:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    healthcheck:
+      # The qdrant image ships no curl/wget; verify it is LISTENing on :6333
+      # (hex 18BD) by reading the kernel socket tables. TCP state 0A == LISTEN.
+      test: ["CMD-SHELL", "grep -qi ':18BD .* 0A ' /proc/net/tcp /proc/net/tcp6 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # RAG-memory MCP server — read-only semantic search over Qdrant, exposed at
+  # http://localhost:${RAG_MCP_PORT:-8084}/mcp (streamable-http). Point any MCP
+  # client at that URL. Embeddings default to local Ollama on the Docker host.
+  rag-mcp:
+    build: .
+    container_name: rag-mcp-server
+    restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-rag_kb}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      # Embedding provider is pluggable — 'ollama' (offline default) or 'openai'
+      # (any OpenAI-compatible endpoint: OpenAI, a LiteLLM proxy, Azure gateway,
+      # TEI, ...). For 'openai' also set EMBEDDINGS_BASE_URL + EMBEDDINGS_API_KEY.
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-ollama}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-nomic-embed-text}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-}
+      EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}
+      EMBED_QUERY_PREFIX: ${EMBED_QUERY_PREFIX:-}
+      EMBED_DOC_PREFIX: ${EMBED_DOC_PREFIX:-}
+      # Hybrid search: dense + local BM25 sparse, RRF-fused (recall). ON by
+      # default; first enabling / disabling requires a re-ingest (schema differs).
+      RAG_HYBRID: ${RAG_HYBRID:-true}
+      RAG_SPARSE_MODEL: ${RAG_SPARSE_MODEL:-Qdrant/bm25}
+      # Reranking (optional, query-time, no re-ingest). OFF by default; set
+      # RERANK_PROVIDER=cohere (+ key/model) to reorder candidates for precision.
+      RERANK_PROVIDER: ${RERANK_PROVIDER:-none}
+      RERANK_MODEL: ${RERANK_MODEL:-rerank-english-v3.0}
+      RERANK_BASE_URL: ${RERANK_BASE_URL:-}
+      RERANK_API_KEY: ${RERANK_API_KEY:-}
+      RERANK_CANDIDATES: ${RERANK_CANDIDATES:-30}
+      RAG_DEFAULT_LIMIT: ${RAG_DEFAULT_LIMIT:-5}
+      RAG_MAX_LIMIT: ${RAG_MAX_LIMIT:-20}
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8084"
+      # Knowledge flywheel: the internal /internal/knowledge/* write API (RCA
+      # capture + feedback) is NOT an MCP tool — invisible to the LLM. Set a token
+      # to require it on those routes (your writer presents the same value).
+      # Blank = open (dev); the routes are still off the model-facing MCP surface.
+      RAG_INTERNAL_TOKEN: ${RAG_INTERNAL_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${RAG_MCP_PORT:-8084}:8084"
+    healthcheck:
+      # A plain GET to /mcp returns HTTP 400 (needs an MCP session handshake), so
+      # `curl -f` would wrongly report unhealthy. Instead verify the server is
+      # LISTENing on :8084 (hex 1F94; TCP state 0A == LISTEN) via the kernel
+      # socket tables. Pure shell, no deps.
+      test: ["CMD-SHELL", "grep -qi ':1F94 .* 0A ' /proc/net/tcp /proc/net/tcp6 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # One-shot batch ingestion job. Run explicitly with:
+  #   docker compose run --rm rag-ingest
+  #   docker compose run --rm rag-ingest --recreate
+  # It shares the RAG image and embedding settings with rag-mcp, so ingestion
+  # cannot drift from query-time vector configuration.
+  rag-ingest:
+    build: .
+    profiles: ["tools"]
+    # The image bakes knowledge/ at build time, but this bind-mount makes
+    # "add a document, run the job" work with no rebuild. The baked copy still
+    # ships in the image for non-Compose runs.
+    volumes:
+      - ./knowledge:/knowledge:ro
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-rag_kb}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-ollama}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-nomic-embed-text}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-}
+      EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}
+      EMBED_QUERY_PREFIX: ${EMBED_QUERY_PREFIX:-}
+      EMBED_DOC_PREFIX: ${EMBED_DOC_PREFIX:-}
+      RAG_HYBRID: ${RAG_HYBRID:-true}
+      RAG_SPARSE_MODEL: ${RAG_SPARSE_MODEL:-Qdrant/bm25}
+      # Chunking + per-request write batching. Passed through explicitly or the
+      # .env values apply only to a host-side run, not this containerised job.
+      CHUNK_SIZE: ${CHUNK_SIZE:-1500}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-100}
+      EMBED_BATCH_SIZE: ${EMBED_BATCH_SIZE:-32}
+      QDRANT_UPSERT_BATCH: ${QDRANT_UPSERT_BATCH:-64}
+    entrypoint: ["python", "/app/ingest.py", "--path", "/knowledge"]
+    restart: "no"
+
+volumes:
+  qdrant_data:
