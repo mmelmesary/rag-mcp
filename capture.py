@@ -10,8 +10,8 @@ IMPORTANT — read-only MCP surface is preserved
 None of this is exposed as an ``@mcp.tool()``. The LLM only ever sees the search
 tools in ``server.py``; capture/feedback are plain HTTP routes (see
 ``server.py`` ``@mcp.custom_route``) called by the trusted agent process, never
-by the model. This keeps the design in ARCHITECTURE_REVIEW §3.1 intact: no write
-tools on the LLM-facing server.
+by the model. This keeps the LLM-facing server strictly read-only — no write
+tools are ever offered to the model.
 
 Embeddings + Qdrant live here (the knowledge service owns them), so capture and
 query embed identically — the hard rule from ``embeddings.py`` (ingest and query
@@ -281,7 +281,7 @@ def find_similar(query: str, doc_type: str = "incident", limit: int = 3, min_sco
 
 def record_feedback(fingerprint: str, status: str | None = None, confidence: str | None = None,
                     note: str | None = None) -> dict[str, Any]:
-    """Attach a human decision back onto a captured incident (§3.8 feedback loop).
+    """Attach a human decision back onto a captured incident (the feedback loop).
     Updates every chunk sharing the fingerprint."""
     fingerprint = (fingerprint or "").strip()
     if not fingerprint:
@@ -306,7 +306,7 @@ def record_feedback(fingerprint: str, status: str | None = None, confidence: str
 
 
 def stats() -> dict[str, Any]:
-    """Knowledge-base counts for the admin/UI (§3.7)."""
+    """Knowledge-base counts for an admin dashboard or UI."""
     try:
         total = _client.count(COLLECTION, exact=True).count
     except Exception:  # noqa: BLE001

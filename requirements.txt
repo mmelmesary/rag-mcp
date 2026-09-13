@@ -1,14 +1,11 @@
-# Keep the SDK on the 1.x line: mcp 2.x removed the `mcp.server.fastmcp`
-# FastMCP API that server.py uses (pin the upper bound or the next rebuild
-# silently installs 2.0.0 and rag-mcp crash-loops on import).
+
 mcp>=1.2.0,<2.0
-# Keep within one minor of the qdrant server image (v1.12.4 in docker-compose.yml)
-# or the client logs a compatibility warning.
 qdrant-client>=1.12,<1.14
 httpx>=0.27.0
 PyYAML>=6.0
 # PDF ingestion support (ingest.py) — text extraction for .pdf knowledge docs.
 pypdf>=4.0
+
 # Local BM25 sparse vectors for hybrid search (retrieval step 1). Runs offline,
 # no API key. Optional at runtime: if it fails to import, rag-mcp falls back to
 # dense-only (see vectorstore.py). Pulls onnxruntime.

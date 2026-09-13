@@ -60,6 +60,7 @@ services:
       # default; first enabling / disabling requires a re-ingest (schema differs).
       RAG_HYBRID: ${RAG_HYBRID:-true}
       RAG_SPARSE_MODEL: ${RAG_SPARSE_MODEL:-Qdrant/bm25}
+
       # Reranking (optional, query-time, no re-ingest). OFF by default; set
       # RERANK_PROVIDER=cohere (+ key/model) to reorder candidates for precision.
       RERANK_PROVIDER: ${RERANK_PROVIDER:-none}

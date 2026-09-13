@@ -81,7 +81,7 @@ Prerequisites: Docker (+ Compose v2), and for the default offline embedding path
 ```bash
 ollama pull nomic-embed-text     # once
 
-git clone https://github.com/<you>/rag-mcp.git && cd rag-mcp
+git clone https://github.com/mmelmesary/rag-mcp.git && cd rag-mcp
 cp .env.example .env             # defaults work out of the box
 
 docker compose up -d --build     # starts Qdrant + rag-mcp
@@ -211,4 +211,4 @@ QDRANT_URL=http://localhost:6333 python3 ingest.py --path knowledge
 
 ## License
 
-TBD — add a license before sharing publicly if you want others to reuse this code.
+[MIT](LICENSE)

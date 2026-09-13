@@ -1,4 +1,4 @@
-"""DevXOps knowledge-base ingestion job.
+"""Knowledge-base ingestion job.
 
 Reads markdown and PDF documents (runbooks, past incidents, RCAs, reference
 material), chunks them, embeds each chunk with Ollama, and upserts into Qdrant.
